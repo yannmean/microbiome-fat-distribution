@@ -1,0 +1,212 @@
+---
+title: "Microbiome_Body_Shape_Results_4.16.18"
+author: "Yan Min"
+date: "4/16/2018"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+This document compiles all the results generated from "Microbiome_Body_shape3.29.18.RMD". 
+Create a result table by association with android and gynoid fat mass ratio. 
+Create a sun burst diagram of the same results by sex. 
+
+Firstly, load the packages that are needed. 
+```{r}
+pkg <- c("phyloseq", "DESeq2", "tidyverse", "ggplot2", "dplyr")
+sapply(pkg, require, character.only = TRUE)
+```
+
+Read all the result tables into r.
+```{r}
+afp <- read.csv("a.f.pRevise.csv", sep = ",")
+afn <- read.csv("a.f.nRevise.csv", sep = ",")
+amp <- read.csv("a.m.pRevise.csv", sep = ",")
+amn <- read.csv("a.m.nRevise.csv", sep = ",")
+gfp <- read.csv("g.f.pRevise.csv", sep = ",")
+gfn <- read.csv("g.f.nRevise.csv", sep = ",")
+gmp <- read.csv("g.m.pRevise.csv", sep = ",")
+gmn <- read.csv("g.m.nRevise.csv", sep = ",")
+```
+
+Create a triple digit variable-resuil coding indicate 3 pieces of information:
+first digit: fat 0-android, 1-gynoid
+second digit: sex 0-female, 1-male
+third digit: association: 0-negative, 1 - positive
+afp - 001, afn - 000, amp - 011, amn - 010, gfp - 101, gfn - 100, gmp - 111, gmn - 110
+```{r}
+#afp$res <- "001"
+afn$res <- "000"
+amp$res <- "011"
+amn$res <- "010"
+gfp$res <- "101"
+gfn$res <- "100"
+gmp$res <- "111"
+gmn$res <- "110"
+```
+
+Merge all the results into one long table
+```{r}
+total <- rbind(afp, amp, afn, amn, gfp, gmp, gfn, gmn) 
+# one result from gfp has many NAs starting from the class level, after blasting, it only has 89% mathch hence delete this result.
+# one result from gfp has one NA at genus level, but the matching is only 96%, hence delete this result as well. 
+# one result from gfn has one NA at genus level, but the matching is only 94%, hence delete this result as well.
+#total <- total[-c(27,28,33),]
+```
+
+Blast all the NA taxa using NCBI database (Full Model)
+```{r}
+total$Genus <- as.character(total$Genus)
+total$Genus[total$taxa =="TACGTAGGTGGCGAGCGTTATCCGGAATGATTGGGCGTAAAGGGTGCGTAGGTGGCAGATCAAGTCTGGAGTAAAAGGTATGGGCTCAACCCGTACTTGCTCTGGAAACTGATCAGCTAGAGAACAGAAGAGGACGGCGGAACTCCATGTGTAGCGGTAAAATGCGTAGATATATGGAAGAACACCGGTGGCGAAGGCGGCCGTCTGGTCTGGATTCTGACACTGAAGCACGAAAGCGTGGGGAGCAAATAGG"] <- "Holdemanella" #97%
+total$Genus[total$taxa == "TACGTAGGTGGCGAGCGTTATCCGGAATCATTGGGCGTAAAGGGTGCGCAGGTGGTACATTAAGTCCGAAGTAAAAGGCAGCAGCTCAACTGCTGTTGGCTTTGGAAACTGGTGAACTGGAGTGCAGGAGAGGGCGATGGAATTCCATGTGTAGCGGTAAAATGCGTAGATATATGGAGGAACACCAGTGGCGAAGGCGGTCGCCTGGCCTGCAACTGACACTGAGGCACGAAAGCGTGGGGAGCAAATAGG"] <- "Absiella" #97%
+total$Genus[total$taxa == "TACGTAGGTGGCGAGCGTTATCCGGAATGATTGGGCGTAAAGGGTGCGTAGGTGGCAGAACAAGTCTGGAGTAAAAGGTATGGGCTCAACCCGTACTGGCTCTGGAAACTGTTCAGCTAGAGAACAGAAGAGGACGGCGGAACTCCATGTGTAGCGGTAAAATGCGTAGATATATGGAAGAACACCGGTGGCGAAGGCGGCCGTCTGGTCTGTTGCTGACACTGAAGCACGAAAGCGTGGGGAGCAAATAGG"] <- "Holdemanella" #99%
+total$Genus[total$taxa == "AACGTAGGGTGCAAGCGTTGTCCGGAATTACTGGGTGTAAAGGGAGCGCAGGCGGACCGGCAAGTTGGAAGTGAAAACCATAGGCTCAACCTATGGATTGCTTTCAAAACTGCTGGCCTTGAGTAGTGCAGAGGTAGGTGGAATTCCCGGTGTAGCGGTGGAATGCGTAGATATCGGGAGGAACACCAGTGGCGAAGGCGACCTACTGGGCACCAACTGACGCTGAGGCTCGAAAGCATGGGTAGCAAACAGG"] <- "Gemmiger" #98%
+total$Genus[total$taxa == "TACGTAGGTGGCAAGCGTTATCCGGAATTACTGGGTGTAAAGGGAGCGCAGGCGGGATAGCAAGTCAGCTGTGAAAACTATGGGCTCAACCCATAAACTGCAGTTGAAACTGTTATTCTTGAGTGGAGTAGAGGCAAGCGGAATTCCGAGTGTAGCGGTGAAATGCGTAGATATTCGGAGGAACACCAGTGGCGAAGGCGGCTTGCTGGGCTCTAACTGACGCTGAGGCTCGAAAGTGTGGGGAGCAAACAGG"] <- "Ruminococcus" #91%
+```
+
+Blast NAs (No Antibiotic Use Model and reduced model without antibiotic use and bmi)
+```{r}
+#total$Genus[total$taxa == "TACGGAGGGTGCGAGCGTTAATCGGAATAACTGGGCGTAAAGGGCACGCAGGCGGACTTTTAAGTGAGGTGTGAAAGCCCCGGGCTTAACCTGGGAATTGCATTTCAGACTGGGAGTCTAGAGTACTTTAGGGAGGGGTAGAATTCCACGTGTAGCGGTGAAATGCGTAGAGATGTGGAGGAATACCGAAGGCGAAGGCAGCCCCTTGGGAATGTACTGACGCTCATGTGCGAAAGCGTGGGGAGCAAACAGG"] <- "Haemophilus" #100%
+# total <- total[-c(16,17,20),] # these three taxa don't exceed 97% matching 
+#total <- total[-c(27,33),]
+```
+
+Extract results associated with android fat mass ratio, save as .csv files for further modification in excel.
+```{r}
+an <- total[1:10,]
+gy <- total[11:21,]
+write.csv(an, file = "androidTableReprot1.20.19_Revised.csv")
+write.csv(gy, file = "gynoidTableReport1.20.19_Revised.csv")
+```
+
+################################################################################
+Extract results by sex prepare for circular barplot with groups
+```{r}
+total$Family <- as.character(total$Family) # change into character, so that subsetting won't pick up unused factor levels
+total$log2FoldChange <- abs(total$log2FoldChange) # to make the barplot, need to change the log2FoldChange into absolute values
+```
+
+group = Family, fill = res, bar height = log2foldchange
+
+Firstly create the barplot for female
+```{r}
+totalF <- total[total$res == "000"|total$res == "101"|total$res == "100",]
+totalF$Family <- as.factor(totalF$Family)
+remove(label_data)
+remove(base_data)
+# set a number of empty bars to add at the end of each group
+empty_bar = 3
+to_add = data.frame(matrix(NA, empty_bar*nlevels(totalF$Family), ncol(totalF)))
+colnames(to_add) <- colnames(totalF)
+to_add$Family = rep(levels(totalF$Family), each = empty_bar)
+totalF <- rbind(totalF, to_add)
+totalF = totalF %>% arrange(Family)
+totalF$id <- seq(1, nrow(totalF))
+# get the name and the y position of each label
+label_data = totalF
+number_of_bar = nrow(label_data)
+angle = 90-360*(label_data$id-0.5)/number_of_bar
+label_data$hjust <- ifelse(angle < -90, 1, 0)
+label_data$angle <- ifelse(angle < -90, angle+180, angle) 
+# prepare a data frame for base lines
+base_data = totalF %>% 
+    group_by(Family) %>% 
+    summarize(start=min(id), end=max(id) - empty_bar) %>% 
+    rowwise() %>% 
+    mutate(title=mean(c(start+0.5, end-0.5))) 
+base_data$name <- c("A","B","C","D","E")
+# make the plot
+pf = ggplot(totalF, aes(x=as.factor(id), y=log2FoldChange, fill = res)) + 
+    geom_bar(aes(x=as.factor(id), y=log2FoldChange, fill = res), stat = "identity", alpha = 0.4) + ylim(-6,12) + 
+    scale_fill_manual(values = c("skyblue1","lightgreen","lightpink"),name = "Effect", breaks = c("000","100","101"), labels = c("Negatively Associated with Android Fat Ratio","Negatively Associated with Gynoid Fat Ratio", "Positively Associated with Gynoid Fat Ratio")) +
+    theme_minimal() +
+    theme(
+        legend.justification = c(1.0, 0.8),
+        legend.title = element_text(size = 8),
+        legend.text = element_text(size = 6),
+        axis.text = element_blank(),
+        axis.title = element_blank(),
+        panel.grid = element_blank()
+        #plot.margin = unit(rep(-1,10), "cm") 
+    ) + coord_polar() + 
+    geom_text(data=label_data, aes(x=id, y=log2FoldChange-3, label=Genus, hjust=hjust), color="black", fontface="bold",alpha=1, size=3, angle= label_data$angle, inherit.aes = FALSE ) +
+# Add base line information
+    geom_segment(data=base_data, aes(x = start-0.5, y = -.5, xend = end+0.5, yend = -.5), colour = "black",  alpha=0.2, size=0.5 , inherit.aes = FALSE ) +  
+    geom_text(data=base_data, aes(x = title, y = -1.7, label=name, hjust=c(0,0,0,1,1)), fontface = "bold", alpha=0.8, size= 2.5, inherit.aes = FALSE)
+```
+
+Then Create the Barplot for male.
+```{r}
+totalM <- total[total$res == "011"|total$res == "010"|total$res == "111"|total$res == "110",]
+totalM$Family <- as.factor(totalM$Family)
+remove(label_data)
+remove(base_data)
+# set a number of empty bars to add at the end of each group
+empty_bar = 3
+to_add = data.frame(matrix(NA, empty_bar*nlevels(totalM$Family), ncol(totalM)))
+colnames(to_add) <- colnames(totalM)
+to_add$Family = rep(levels(totalM$Family), each = empty_bar)
+totalM <- rbind(totalM, to_add)
+totalM = totalM %>% arrange(Family)
+totalM$id <- seq(1, nrow(totalM))
+# get the name and the y position of each label
+label_data = totalM
+number_of_bar = nrow(label_data)
+angle = 90-360*(label_data$id-0.5)/number_of_bar
+label_data$hjust <- ifelse(angle < -90, 1, 0)
+label_data$angle <- ifelse(angle < -90, angle+180, angle) 
+# prepare a data frame for base lines
+base_data = totalM %>% 
+    group_by(Family) %>% 
+    summarize(start=min(id), end=max(id) - empty_bar) %>% 
+    rowwise() %>% 
+    mutate(title=mean(c(start+0.5, end-0.5))) 
+base_data$name <- c("A","B","C","D","E")
+# make the plot
+p = ggplot(totalM, aes(x=as.factor(id), y=log2FoldChange, fill = res)) + 
+    geom_bar(aes(x=as.factor(id), y=log2FoldChange, fill = res), stat = "identity", alpha = 0.4) + ylim(-6,25) + 
+    scale_fill_manual(values = c("skyblue1","khaki1","lightgreen","lightpink"),name = "Effect", breaks = c("010", "011", "110", "111"), labels = c("Negatively Associated with Android Fat Ratio", "Positively Associated with Android Fat Ratio", "Negatively Associated with Gynoid Fat Ratio", "Positively Associated with Gynoid Fat Ratio")) +
+    theme_minimal() +
+    theme(
+        legend.justification = c(1.0, 0.8),
+        legend.title = element_text(size = 8),
+        legend.text = element_text(size = 6),
+        axis.text = element_blank(),
+        axis.title = element_blank(),
+        panel.grid = element_blank()
+        #plot.margin = unit(rep(-1,10), "cm") 
+    ) + coord_polar() + 
+    geom_text(data=label_data, aes(x=id, y=log2FoldChange-3, label=Genus, hjust=hjust), color="black", fontface="bold",alpha=1, size=3, angle= label_data$angle, inherit.aes = FALSE ) +
+# Add base line information
+    geom_segment(data=base_data, aes(x = start-0.5, y = -.5, xend = end+0.5, yend = -.5), colour = "black",  alpha=0.2, size=0.5 , inherit.aes = FALSE ) +  
+    geom_text(data=base_data, aes(x = title, y = -1.7, label=name, hjust=c(0,0,0,1,1)), fontface = "bold", alpha=0.8, size=3, inherit.aes = FALSE)
+
+
+```
+
+afn$res <- "000"
+amp$res <- "011"
+amn$res <- "010"
+gfp$res <- "101"
+gfn$res <- "100"
+gmp$res <- "111"
+gmn$res <- "110"
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

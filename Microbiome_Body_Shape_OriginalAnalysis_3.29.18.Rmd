@@ -1,0 +1,462 @@
+---
+title: "Microbiome_Body_Shape_3.29"
+author: "Yan Min"
+date: "3/28/2018"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r, message=FALSE}
+pkgneeded <- c("phyloseq", "DESeq2", "genefilter", "pheatmap", "dplyr", "gridExtra", "ggplot2", "readxl", "reshape", "cluster", "RColorBrewer", "grid")
+sapply(pkgneeded, require, character.only = TRUE)
+setwd("~/Documents/WELL_Project/Microbiome/Microbiome_Body_Shape")
+```
+
+Fristly load data components: sample data, OTU table, Taxa table, and phylogenetic tree. 
+```{r read data}
+seqtab <- readRDS("seqtab.rds")
+sample <- read.csv("sampleSub_4122018.csv")
+sample$X <- NULL
+taxatab <- readRDS("taxa.rds")
+tax.tab <- as.data.frame(taxatab)
+tax.tab$taxa.id <- paste(rep("ID.", nrow(tax.tab)), 1:nrow(tax.tab)) # Assign taxa id to taxa table. use this version of taxa table to match the results. 
+phytree <- readRDS("phylo_tree.rds")
+df <- read.csv("WELL-China_Firstwave_Metabolic_Disease_Analysis_For_Prediabetes.csv")
+df2 <- read.csv("~/Documents/WELL_Project/Microbiome/Microbiome_Body_Shape/WELL.China_Cohort1_20171025.csv", header=TRUE)
+id <- sample$id
+dfSub <- df[df$id %in% id,]
+dfSub.anti <- dfSub[,c("id", "antibiotic", "ratio_fat", "ratio_carbohydrate")]
+
+###Resond to the reviewer's question, examine the menopause 11.19.2018
+#df2Sub <- df2[df2$id %in% id, c("id","nomens_why")]
+
+sample <- merge(sample, dfSub.anti, by = "id")
+sample$antibiotic <- as.factor(sample$antibiotic)
+###Merge the last mens_age to the sample data 11.19.2018
+#sample <- merge(sample, df2Sub, by = "id")
+sample <- sample[!is.na(sample$antibiotic),] # only keep the complete cases in the sample (1 male was deleted for not having antibiotic information)
+### Create another dummy variable indicating menopause status
+#sample$meno <- 0
+#sample$meno[sample$nomens_why==3] <- 1
+rownames(sample) <- sample$Number
+seqtab <- seqtab[rownames(seqtab) %in% rownames(sample),] # only keep the complete cases in the otu table
+```
+
+```{r}
+taxatab["TACGTAGGGGGCAAGCGTTATCCGGATTTACTGGGTGTAAAGGGAGCGTAGACGGCATGGCAAGCCAGATGTGAAAGCCCGGGGCTCAACCCCGGGACTGCATTTGGAACTGTCAGGCTAGAGTGTCGGAGAGGAAAGCGGAATTCCTAGTGTAGCGGTGAAATGCGTAGATATTAGGAGGAACACCAGTGGCGAAGGCGGCTTTCTGGACGATGACTGACGTTGAGGCTCGAAAGCGTGGGGAGCAAACAGG", 6] <- "Blautia" #100%
+taxatab["TACGTATGGAGCAAGCGTTATCCGGATTTACTGGGTGTAAAGGGAGTGTAGGTGGCCAGGCAAGTCAGAAGTGAAAGCCCGGGGCTCAACCCCGGGACTGCTTTTGAAACTGCAGGGCTAGAGTGCAGGAGGGGCAAGTGGAATTCCTAGTGTAGCGGTGAAATGCGTAGATATTAGGAGGAACACCAGTGGCGAAGGCGGCTTGCTGGACTGTAACTGACACTGAGGCTCGAAAGCGTGGGGAGCAAACAGG", 3:6] <- c("Bacilli", "Lactobacillales", "Lactobacillaceae", "Lactobacillus") #100%
+taxatab["TACGTATGGAGCAAGCGTTATCCGGATTTACTGGGTGTAAAGGGAGTGTAGGTGGCCATGCAAGTCAGAAGTGAAAATCCGGGGCTCAACCCCGGAACTGCTTTTGAAACTGTGAGGCTAGAGTGCAGGAGGGGTGAGTGGAATTCCTAGTGTAGCGGTGAAATGCGTAGATATTAGGAGGAACACCAGTGGCGAAGGCGGCTCACTGGACTGTAACTGACACTGAGGCTCGAAAGCGTGGGGAGCAAACAGG", 5:6] <- c("Eubacteriaceae", "Eubacterium") #99%
+
+```
+
+Construct they phyloseq object.
+```{r phyloseq object}
+ps <- phyloseq(otu_table(seqtab, taxa_are_rows = FALSE), sample_data(sample), tax_table(taxatab), phy_tree(phytree))
+saveRDS(ps, file = "phyloseqObject_9.14.2018.rds")
+```
+
+Stratify by gender 
+```{r stratification}
+ps.f <- subset_samples(ps, gender %in% "Female")
+ps.m <- subset_samples(ps, gender %in% "Male")
+```
+
+Create the categorical variabbles for android fat mass, gynoid fat mass, and aoi in both sexes seperately.
+```{r}
+sample_data(ps.f)$Android_FM_Cat <- cut(sample_data(ps.f)$Android_FM, breaks = c(quantile(sample_data(ps.f)$Android_FM, probs = seq(0, 1, by = 0.25))), include.lowest = TRUE)
+sample_data(ps.f)$Gynoid_FM_Cat <- cut(sample_data(ps.f)$Gynoid_FM, breaks = c(quantile(sample_data(ps.f)$Gynoid_FM, probs = seq(0, 1, by = 0.25))), include.lowest = TRUE)
+sample_data(ps.f)$aoi_Cat <- cut(sample_data(ps.f)$aoi, breaks = c(quantile(sample_data(ps.f)$aoi, probs = seq(0, 1, by = 0.25))), include.lowest = TRUE)
+sample_data(ps.f)$Total_FM_Cat <- cut(sample_data(ps.f)$total_fm_ratio, breaks = 4, include.lowest = TRUE)
+
+levels(sample_data(ps.f)$Android_FM_Cat) <- c(1,2,3,4)
+levels(sample_data(ps.f)$Gynoid_FM_Cat) <- c(1,2,3,4)
+levels(sample_data(ps.f)$aoi_Cat) <- c(1,2,3,4)
+levels(sample_data(ps.f)$Total_FM_Cat) <- c(1,2,3,4)
+
+sample_data(ps.m)$Android_FM_Cat <- cut(sample_data(ps.m)$Android_FM, breaks = c(quantile(sample_data(ps.m)$Android_FM, probs = seq(0, 1, by = 0.25))), include.lowest = TRUE)
+sample_data(ps.m)$Gynoid_FM_Cat <- cut(sample_data(ps.m)$Gynoid_FM, breaks = c(quantile(sample_data(ps.m)$Gynoid_FM, probs = seq(0, 1, by = 0.25))), include.lowest = TRUE)
+sample_data(ps.m)$aoi_Cat <- cut(sample_data(ps.m)$aoi, breaks = c(quantile(sample_data(ps.m)$aoi, probs = seq(0, 1, by = 0.25))), include.lowest = TRUE)
+sample_data(ps.m)$Total_FM_Cat <- cut(sample_data(ps.m)$total_fm_ratio, breaks = 4, include.lowest = TRUE)
+levels(sample_data(ps.m)$Android_FM_Cat) <- c(1,2,3,4)
+levels(sample_data(ps.m)$Gynoid_FM_Cat) <- c(1,2,3,4)
+levels(sample_data(ps.m)$aoi_Cat) <- c(1,2,3,4)
+levels(sample_data(ps.m)$Total_FM_Cat) <- c(1,2,3,4)
+```
+
+Scale the sample data. 
+```{r}
+sample_data(ps.f) <- as.data.frame(cbind(sample_data(ps.f)[,c(1:8,29:33)], scale(sample_data(ps.f)[,c(9:28)])))
+sample_data(ps.m) <- as.data.frame(cbind(sample_data(ps.m)[,c(1:8,29:33)], scale(sample_data(ps.m)[,c(9:28)])))
+```
+
+Apply filter to filt out the highly abundant taxa in male and female participants separately. 
+Definition of highly abundant: seen more than 5 counts in 7% or more of the samples of each sex.
+```{r}
+ps.f.filt <- filter_taxa(ps.f, function(x) sum(x>5) > (0.07*length(x)), prune = TRUE) # leaves 336 taxa in 116 female
+ps.m.filt <- filter_taxa(ps.m, function (x) sum(x>5) > (0.07*length(x)), prune = TRUE) # leaves 323 taxa in 97 male 
+```
+
+6.24.2018 Save ps.f.filt & ps.m.filt for revision analysis (Re Prof.Zhu's questions)
+```{r}
+#saveRDS(ps.f.filt, file = "ps.f.filt")
+#saveRDS(ps.m.filt, file = "ps.m.filt")
+```
+
+Prepare DESeq objects (summarized experiment)
+```{r}
+col.f <- sample_data(ps.f.filt)
+col.m <- sample_data(ps.m.filt)
+count.f <- t(as.data.frame(otu_table(ps.f.filt)))
+count.m <- t(as.data.frame(otu_table(ps.m.filt)))
+```
+
+Construct DESeq models.
+Firstly test taxa associated with android fat mass (here we use the android fat mass to total fat mass ratio)
+```{r}
+dds.android.f <- DESeqDataSetFromMatrix(countData = count.f, colData = col.f, design = ~ age + batch.cat + diet_fat + diet_carbohydrate + smoke + alcohol + bmi + antibiotic + Android_FM)
+dds.android.m <- DESeqDataSetFromMatrix(countData = count.m, colData = col.m, design = ~ age + batch.cat + diet_fat + diet_carbohydrate + smoke + alcohol + bmi + antibiotic + Android_FM)
+```
+
+Estimate size factor & dispersion
+```{r}
+dds.android.f <- estimateSizeFactors(dds.android.f, type = "poscounts")
+dds.android.m <- estimateSizeFactors(dds.android.m, type = "poscounts")
+
+dds.android.f <- estimateDispersions(dds.android.f, fitType = "local")
+dds.android.m <- estimateDispersions(dds.android.m, fitType = "local")
+
+#plotDispEsts(dds.android.f)
+#plotDispEsts(dds.android.m)
+```
+
+Extract the variance stablized data for the Heatmaps.
+```{r}
+### this part is not changed yet during 6.25 revision!!! Depending on which count numbers will be used for the heatmap
+vst.android.f <- getVarianceStabilizedData(dds.android.f)
+vst.android.m <- getVarianceStabilizedData(dds.android.m)
+#saveRDS(vst.android.f, file = "vst.android.f.rds")
+#saveRDS(vst.android.m, file = "vst.android.m.rds")
+```
+
+Wald test for android fat.
+```{r}
+dds.android.f <- nbinomWaldTest(dds.android.f)
+dds.android.m <- nbinomWaldTest(dds.android.m)
+```
+
+Access the results.
+```{r}
+res.android.f <- results(dds.android.f, alpha = 0.01, ifcThreadshold = 1)
+res.android.m <- results(dds.android.m, alpha = 0.01, ifcThreadshold = 1)
+```
+
+Filter the results using padj < 0.01, log2foldchange >1 for each sex.
+```{r}
+res.android.f.positive <- res.android.f[res.android.f$log2FoldChange > 2 & res.android.f$padj < 0.01 & !is.na(res.android.f$padj),]
+res.android.m.positive <- res.android.m[res.android.m$log2FoldChange > 2 & res.android.m$padj < 0.01 & !is.na(res.android.m$padj),]
+res.android.f.negative <- res.android.f[res.android.f$log2FoldChange < -2 & res.android.f$padj < 0.01 & !is.na(res.android.f$padj),]
+res.android.m.negative <- res.android.m[res.android.m$log2FoldChange < -2 & res.android.m$padj < 0.01 & !is.na(res.android.m$padj),]
+```
+
+Match taxa to the taxa table.
+```{r}
+matchTaxa <- function(result, reference){
+  names <- rownames(result)
+  taxa <- as.data.frame(reference[rownames(reference) %in% names,])
+} # Function to create a taxa table for all the significant taxa. 
+
+otu.android.f.positive <- matchTaxa(res.android.f.positive, tax.tab)
+otu.android.m.positive <- matchTaxa(res.android.m.positive, tax.tab)
+otu.android.f.negative <- matchTaxa(res.android.f.negative, tax.tab)
+otu.android.m.negative <- matchTaxa(res.android.m.negative, tax.tab)
+```
+
+Create the result table for paper
+```{r}
+android.f.positive <- as.data.frame(cbind(otu.android.f.positive,res.android.f.positive[,c(2,6)]))
+android.m.positive <- as.data.frame(cbind(otu.android.m.positive,res.android.m.positive[,c(2,6)]))
+android.f.positive$taxa <- rownames(android.f.positive)
+android.m.positive$taxa <- rownames(android.m.positive)
+android.f.negative <- as.data.frame(cbind(otu.android.f.negative,res.android.f.negative[,c(2,6)]))
+android.m.negative <- as.data.frame(cbind(otu.android.m.negative,res.android.m.negative[,c(2,6)]))
+android.f.negative$taxa <- rownames(android.f.negative)
+android.m.negative$taxa <- rownames(android.m.negative)
+android.list <- list(a.f.p = android.f.positive, a.f.n = android.f.negative, a.m.p = android.m.positive, a.m.n = android.m.negative)
+mapply(write.csv, android.list, file = paste0(names(android.list), ".csv"))
+```
+
+There are no pairwise intersect between all 4 android fat result tables. (Female positive & negative; male positive & negative)
+
+Secondly test taxa associated with gynoid fat mass (also use gynoid fat mass to total fat mass ratio)
+```{r}
+dds.gynoid.f <- DESeqDataSetFromMatrix(countData = count.f, colData = col.f, design = ~ age + batch.cat + diet_fat + diet_carbohydrate + smoke + alcohol + bmi + antibiotic + Gynoid_FM)
+dds.gynoid.m <- DESeqDataSetFromMatrix(countData = count.m, colData = col.m, design = ~ age + batch.cat + diet_fat + diet_carbohydrate + smoke + alcohol + bmi + antibiotic + Gynoid_FM)
+```
+
+Estimate size factor & dispersion
+```{r}
+dds.gynoid.f <- estimateSizeFactors(dds.gynoid.f, type = "poscounts")
+dds.gynoid.m <- estimateSizeFactors(dds.gynoid.m, type = "poscounts")
+
+dds.gynoid.f <- estimateDispersions(dds.gynoid.f, fitType = "local")
+dds.gynoid.m <- estimateDispersions(dds.gynoid.m, fitType = "local")
+
+#plotDispEsts(dds.gynoid.f)
+#plotDispEsts(dds.gynoid.m)
+```
+
+Extract the variance stablized data for the Heatmaps.
+```{r}
+### also not changed during 6.25 revision, depending on what to use for the heatmap
+vst.gynoid.f <- getVarianceStabilizedData(dds.gynoid.f)
+vst.gynoid.m <- getVarianceStabilizedData(dds.gynoid.m)
+#saveRDS(vst.gynoid.f, file = "vst.gynoid.f.rds")
+#saveRDS(vst.gynoid.m, file = "vst.gynoid.m.rds")
+```
+
+Wald test for gynoid fat.
+```{r}
+dds.gynoid.f <- nbinomWaldTest(dds.gynoid.f)
+dds.gynoid.m <- nbinomWaldTest(dds.gynoid.m)
+```
+
+Access the results.
+```{r}
+res.gynoid.f <- results(dds.gynoid.f, alpha = 0.01, ifcThreadshold = 1)
+res.gynoid.m <- results(dds.gynoid.m, alpha = 0.01, ifcThreadshold = 1)
+```
+
+Filter the results using padj < 0.01, log2foldchange >1 for each sex.
+```{r}
+res.gynoid.f.positive <- res.gynoid.f[res.gynoid.f$log2FoldChange > 1 & res.gynoid.f$padj < 0.01 & !is.na(res.gynoid.f$padj),]
+res.gynoid.m.positive <- res.gynoid.m[res.gynoid.m$log2FoldChange > 1 & res.gynoid.m$padj < 0.01 & !is.na(res.gynoid.m$padj),]
+res.gynoid.f.negative <- res.gynoid.f[res.gynoid.f$log2FoldChange < -1 & res.gynoid.f$padj < 0.01 & !is.na(res.gynoid.f$padj),]
+res.gynoid.m.negative <- res.gynoid.m[res.gynoid.m$log2FoldChange < -1 & res.gynoid.m$padj < 0.01 & !is.na(res.gynoid.m$padj),]
+```
+
+Match taxa to taxa table.
+```{r}
+otu.gynoid.f.positive <- matchTaxa(res.gynoid.f.positive, tax.tab)
+otu.gynoid.m.positive <- matchTaxa(res.gynoid.m.positive, tax.tab)
+otu.gynoid.f.negative <- matchTaxa(res.gynoid.f.negative, tax.tab)
+otu.gynoid.m.negative <- matchTaxa(res.gynoid.m.negative, tax.tab)
+```
+
+Create result table.
+```{r}
+gynoid.f.positive <- as.data.frame(cbind(otu.gynoid.f.positive,res.gynoid.f.positive[,c(2,6)]))
+gynoid.m.positive <- as.data.frame(cbind(otu.gynoid.m.positive,res.gynoid.m.positive[,c(2,6)]))
+gynoid.f.positive$taxa <- rownames(gynoid.f.positive)
+gynoid.m.positive$taxa <- rownames(gynoid.m.positive)
+gynoid.f.negative <- as.data.frame(cbind(otu.gynoid.f.negative,res.gynoid.f.negative[,c(2,6)]))
+gynoid.m.negative <- as.data.frame(cbind(otu.gynoid.m.negative,res.gynoid.m.negative[,c(2,6)]))
+gynoid.f.negative$taxa <- rownames(gynoid.f.negative)
+gynoid.m.negative$taxa <- rownames(gynoid.m.negative)
+gynoid.list <- list(g.f.p = gynoid.f.positive, g.f.n = gynoid.f.negative, g.m.p = gynoid.m.positive, g.m.n = gynoid.m.negative)
+mapply(write.csv, gynoid.list, file = paste0(names(gynoid.list), ".csv"))
+```
+
+Safe the whole session in case R crashes.
+```{r}
+save.image(file = "Microbiome_BodyShape_WholeSession.rdata")
+```
+
+################################################################################
+
+Firstly create the heatmap for the microbiome abundance of the 4 android fat mass quartiles
+```{r order android taxa}
+ps.f.vst.android <- phyloseq(otu_table(t(vst.android.f), taxa_are_rows = FALSE), sample_data(sample_data(ps.f.filt)), tax_table(taxatab), phy_tree(phytree)) # create a new phyloseq object using variance stablized count data. Used for 6.28 clustering analysis. 
+#saveRDS(ps.f.vst.android, "ps.f.vst.android")
+ps.m.vst.android <- phyloseq(otu_table(t(vst.android.m), taxa_are_rows = FALSE), sample_data(sample_data(ps.m.filt)), tax_table(taxatab), phy_tree(phytree)) # create a new phyloseq object using vst count data. Used for 6.28 clustering analysis
+#saveRDS(ps.m.vst.android, "ps.m.vst.android")
+taxa.order.android.f <- names(sort(taxa_sums(ps.f.vst.android), decreasing = TRUE))
+taxa.order.android.m <- names(sort(taxa_sums(ps.m.vst.android), decreasing = TRUE))
+quartile <- as.character(seq(1:4))
+```
+
+```{r create android heatmaps for female}
+plot.list.anfroid.f <- list()
+for(x in quartile){
+  pshm.android.f <- prune_taxa(taxa.order.android.f[1:30], ps.f.vst.android)
+  pshm.android.f <- prune_samples(sample_data(pshm.android.f)$Total_FM_Cat == x, pshm.android.f)
+  #sample_data(pshm.android.f)$abund <- rowSums(otu_table(pshm.android.f))
+  p <- plot_heatmap(pshm.android.f, taxa.label = "Genus", taxa.order = taxa.order.android.f, sample.order = "Android_FM") + ggtitle(paste("Female Total Fat Ratio Bin:", x)) + theme(plot.title = element_text(size = 12), axis.text.x = element_blank(), axis.ticks.x = element_blank()) + coord_fixed() + xlab(paste("Samples Ordered by Android Fat Ratio", "\n(Low-to-High)")) + scale_fill_continuous(low = "white", high = "red3") + theme(legend.title = element_text(size = 8), legend.text = element_text(size = 6),plot.title = element_text(hjust = 0.5)) 
+  plot.list.anfroid.f[[x]] = p
+}
+grid.arrange(grobs = plot.list.anfroid.f[c(2:3)], nrow = 2)
+
+prunedTaxaAF <- otu_table(prune_taxa(taxa.order.android.f[1:30], ps.f.vst.android))
+prunedSampleF <- sample_data(prune_taxa(taxa.order.android.f[1:30], ps.f.vst.android))[,c("Android_FM_Cat", "Gynoid_FM_Cat")]
+prunedSampleFFull <- sample_data(prune_taxa(taxa.order.android.f[1:30], ps.f.vst.android))
+write.csv(prunedTaxaAF, file = "Figure1_Female_Android.csv")
+write.csv(prunedSampleF, file = "Figure1_FemaleSample.csv")
+write.csv(prunedSampleFFull, file = "Appendix_1-5_FemaleSampleFull.csv")
+```
+
+```{r create android heatmap for male}
+plot.list.anfroid.m <- list()
+for(x in quartile){
+  pshm.android.m <- prune_taxa(taxa.order.android.m[1:30], ps.m.vst.android)
+  pshm.android.m <- prune_samples(sample_data(pshm.android.m)$Total_FM_Cat == x, pshm.android.m)
+  sample_data(pshm.android.m)$abund <- rowSums(otu_table(pshm.android.m))
+  p <- plot_heatmap(pshm.android.m, taxa.label = "Genus", taxa.order = taxa.order.android.m, sample.order = "Android_FM") + ggtitle(paste("Male Total Fat Ratio Bin:", x)) + theme(plot.title = element_text(size = 12), axis.text.x = element_blank(), axis.ticks.x = element_blank()) + coord_fixed() + xlab(paste("Samples Ordered by Anrdoid Fat Ratio", "\n(Low-to-High)")) + scale_fill_continuous(low = "white", high = "red3") + theme(legend.title = element_text(size = 8), legend.text = element_text(size = 6), plot.title = element_text(hjust = 0.5)) 
+  plot.list.anfroid.m[[x]] = p
+}
+grid.arrange(grobs = plot.list.anfroid.m[c(2:3)], nrow = 2)
+
+prunedTaxaAM <- otu_table(prune_taxa(taxa.order.android.m[1:30], ps.m.vst.android))
+prunedSampleM <- sample_data(prune_taxa(taxa.order.android.m[1:30], ps.m.vst.android))[,c("Android_FM_Cat", "Gynoid_FM_Cat")]
+prunedSampleMFull <- sample_data(prune_taxa(taxa.order.android.m[1:30], ps.m.vst.android))
+write.csv(prunedTaxaAM, file = "Figure1_Male_Android.csv")
+write.csv(prunedSampleM, file = "Figure1_MaleSample.csv")
+write.csv(prunedSampleMFull, file = "Appendix_1-5_MaleSampleFull.csv")
+```
+
+Then create the heatmap for the microbiome abundance of the 4 gynoid fat mass quartiles
+```{r order gynoid taxa}
+ps.f.vst.gynoid <- phyloseq(otu_table(t(vst.gynoid.f), taxa_are_rows = FALSE), sample_data(sample_data(ps.f.filt)), tax_table(taxatab), phy_tree(phytree)) # create a new phyloseq object using variance stablized count data. Used for 6.28 clustering analysis. 
+saveRDS(ps.f.vst.gynoid, "ps.f.vst.gynoid")
+ps.m.vst.gynoid <- phyloseq(otu_table(t(vst.gynoid.m), taxa_are_rows = FALSE), sample_data(sample_data(ps.m.filt)), tax_table(taxatab), phy_tree(phytree)) # create a new phyloseq object using variance stablized count data. Used for 6.28 clustering analysis. 
+saveRDS(ps.m.vst.gynoid, "ps.m.vst.gynoid")
+taxa.order.gynoid.f <- names(sort(taxa_sums(ps.f.vst.gynoid), decreasing = TRUE))
+taxa.order.gynoid.m <- names(sort(taxa_sums(ps.m.vst.gynoid), decreasing = TRUE))
+```
+
+```{r create gynoid fat heatmaps for female}
+plot.list.gynoid.f <- list()
+for(x in quartile){
+  pshm.gynoid.f <- prune_taxa(taxa.order.gynoid.f[1:30], ps.f.vst.gynoid)
+  pshm.gynoid.f <- prune_samples(sample_data(pshm.gynoid.f)$Total_FM_Cat == x, pshm.gynoid.f)
+  sample_data(pshm.gynoid.f)$abund <- rowSums(otu_table(pshm.gynoid.f))
+  p <- plot_heatmap(pshm.gynoid.f, taxa.label = "Genus", taxa.order = taxa.order.gynoid.f, sample.order = "Gynoid_FM") + ggtitle(paste("Female Total Fat Ratio Bin:", x)) + theme(plot.title = element_text(size = 12), axis.text.x = element_blank(), axis.ticks.x = element_blank()) + coord_fixed() + xlab(paste("Samples Ordered by Gynoid Fat Ratio", "\n(Low-to-High)")) + scale_fill_continuous(low = "white", high = "red3") + theme(legend.title = element_text(size = 8), legend.text = element_text(size = 6), plot.title = element_text(hjust = 0.5)) 
+  plot.list.gynoid.f[[x]] = p
+}
+grid.arrange(grobs = plot.list.gynoid.f[c(2:3)], nrow = 2)
+
+prunedTaxaGF <- otu_table(prune_taxa(taxa.order.gynoid.f[1:30], ps.f.vst.gynoid))
+write.csv(prunedTaxaGF, file = "Figure1_Female_Gynoid.csv")
+```
+
+```{r create gynoid heatmap for male}
+plot.list.gynoid.m <- list()
+for(x in quartile){
+  pshm.gynoid.m <- prune_taxa(taxa.order.gynoid.m[1:30], ps.m.vst.gynoid)
+  pshm.gynoid.m <- prune_samples(sample_data(pshm.gynoid.m)$Total_FM_Cat == x, pshm.gynoid.m)
+  sample_data(pshm.gynoid.m)$abund <- rowSums(otu_table(pshm.gynoid.m))
+  p <- plot_heatmap(pshm.gynoid.m, taxa.label = "Genus", taxa.order = taxa.order.gynoid.m, sample.order = "Gynoid_FM") + ggtitle(paste("Male Gynoid Fat Mass Bin:", x)) + theme(plot.title = element_text(size = 12), axis.text.x = element_blank(), axis.ticks.x = element_blank()) + coord_fixed() + xlab(paste("Samples Ordered by Gynoid Fat Ratio", "\n(Low-to-High)")) + scale_fill_continuous(low = "white", high = "red3") + theme(legend.title = element_text(size = 8), legend.text = element_text(size = 6), plot.title = element_text(hjust = 0.5)) #axis.text.x = element_blank(), 
+  plot.list.gynoid.m[[x]] = p
+}
+grid.arrange(grobs = plot.list.gynoid.m[c(2:3)], nrow = 2)
+
+prunedTaxaGM <- otu_table(prune_taxa(taxa.order.gynoid.m[1:30], ps.m.vst.gynoid))
+write.csv(prunedTaxaGM, file = "Figure1_Male_Gynoid.csv")
+```
+
+################################################################################
+Merge result table, create two new variables:
+effect: indicates whether the taxa is protective or harmful, positively related to android fat or negatively related to gynoid fat are considered harmful, coded as 1; negatively related to android fat or positively related to gynoid fat are considered protective, coded as o. 
+sex: detected in female coded as 0, male coded as 1
+```{r merge results}
+merge.result.f <- rbind(android.f.positive, android.f.negative, gynoid.f.positive, gynoid.f.negative)
+merge.result.f$effect[merge.result.f$taxa %in% c(rownames(android.f.positive), rownames(gynoid.f.negative))] <- 1
+merge.result.f$effect[is.na(merge.result.f$effect)] <- 0
+merge.result.f$log2FoldChange <- abs(merge.result.f$log2FoldChange)
+merge.result.f$Genus <- as.character(merge.result.f$Genus)
+merge.result.f[5,6] <- "Sporobacter" #94%
+merge.result.f[20,6] <- "Sporobacter" #94%
+
+write.csv(merge.result.f, file = "merge.result.f.csv")
+
+merge.result.m <- rbind(android.m.positive, android.m.negative, gynoid.m.positive, gynoid.m.negative)
+merge.result.m$effect[merge.result.m$taxa %in% c(rownames(android.m.positive), rownames(gynoid.m.negative))] <- 1
+merge.result.m$effect[is.na(merge.result.m$effect)] <- 0
+merge.result.m$log2FoldChange <- abs(merge.result.m$log2FoldChange)
+merge.result.m$Family <- as.character(merge.result.m$Family)
+merge.result.m$Genus <- as.character(merge.result.m$Genus)
+merge.result.m[1,6] <- "Holdemanella" #97%
+merge.result.m[4,6] <- "Absiella" #97%
+merge.result.m[5,6] <- "Haemophilus" #100%
+merge.result.m[9,c(5,6)] <- c("Clostridiaceae", "Clostridium") #92%
+merge.result.m[11,6] <- "Senegalimassilia" #100%
+merge.result.m[17,6] <- "Lachnoclostridium" #96%
+merge.result.m[24,c(5,6)] <- c("Clostridiales Family XIII. Incertae Sedis", "Ihubacter") #97%
+
+write.csv(merge.result.m, file = "merge.result.m.csv")
+```
+
+################################################################################
+Finally, generate a demographic table for the paper
+```{r}
+tableRate <- function(dataframe, varname1, varname2) {
+  p <- table(dataframe[,varname1], dataframe[,varname2])
+  p <- as.data.frame(p)
+  p <- cast(p, Var1 ~ Var2, value = "Freq") # note that the function only support varname2 as a categorical variable with 2 levels 
+  colnames(p) <- c(varname1, "male", "female")
+  p$total <- p$male + p$female
+  p$mper <- p$male/sum(p$male)
+  p$fper <- p$female/sum(p$female)
+  p$totalper <- p$total/sum(p$total)
+  return(p)
+}
+```
+
+```{r}
+tableRate(dfSub, "agecat2", "gender_it")
+tableRate(dfSub, "marriage", "gender_it")
+tableRate(dfSub, "edu", "gender_it")
+tableRate(dfSub, "bmicat2", "gender_it")
+tableRate(dfSub, "whrcat", "gender_it")
+tableRate(dfSub, "smoke", "gender_it")
+tableRate(dfSub, "alcohol", "gender_it")
+tableRate(dfSub, "antibiotic", "gender_it")
+tableRate(dfSub, "nutri_suppl", "gender_it")
+tableRate(dfSub, "meta", "gender_it")
+```
+
+Get the correlation coeffcients and variance of android and gynoid fat ratio by gender.
+```{r}
+fsam <- as.data.frame(sample_data(ps.f.filt))
+msam <- as.data.frame(sample_data(ps.m.filt))
+```
+
+```{r}
+cor(fsam$Android_FM, fsam$Gynoid_FM)
+cor(msam$Android_FM, msam$Gynoid_FM)
+```
+
+```{r}
+originfsam <- sample[sample$gender == "Female",]
+originmsam <- sample[sample$gender == "Male",]
+sd(originfsam$Android_FM)
+sd(originmsam$Android_FM)
+sd(originfsam$Gynoid_FM)
+sd(originmsam$Gynoid_FM)
+```
+
+#### Investigate menopause in women and taxa associated with Android_FM
+```{r}
+dds.android.f <- DESeqDataSetFromMatrix(countData = count.f, colData = col.f, design = ~ age + batch.cat + diet_fat + diet_carbohydrate + smoke + alcohol + bmi + antibiotic + meno + Android_FM)
+dds.android.f <- estimateSizeFactors(dds.android.f, type = "poscounts")
+dds.android.f <- estimateDispersions(dds.android.f, fitType = "local")
+dds.android.f <- nbinomWaldTest(dds.android.f)
+```
+
+```{r}
+dds.gynoid.f <- DESeqDataSetFromMatrix(countData = count.f, colData = col.f, design = ~ age + batch.cat + diet_fat + diet_carbohydrate + smoke + alcohol + bmi + antibiotic + Gynoid_FM)
+dds.gynoid.f <- estimateSizeFactors(dds.gynoid.f, type = "poscounts")
+dds.gynoid.f <- estimateDispersions(dds.gynoid.f, fitType = "local")
+dds.gynoid.f <- nbinomWaldTest(dds.gynoid.f)
+```
+
+```{r}
+res.android.f <- results(dds.android.f, alpha = 0.01)
+```
+
+------------- Save all the datasets for figure generation -----------
+```{r}
+setwd("~/Documents/WELL_Project/Microbiome/Microbiome_Body_Shape")
+load("Microbiome_BodyShape_WholeSession.rdata")
+```
